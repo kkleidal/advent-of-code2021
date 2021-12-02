@@ -4,7 +4,9 @@ fn parse_input() -> Vec<i32> {
     let mut out: Vec<i32> = Vec::new();
     let mut buffer = String::new();
     loop {
-        let n = io::stdin().read_line(&mut buffer).expect("Failed to read stdin");
+        let n = io::stdin()
+            .read_line(&mut buffer)
+            .expect("Failed to read stdin");
         if n == 0 {
             // End of input
             break;
@@ -33,7 +35,7 @@ fn number_increases(values: &[i32]) -> usize {
 fn convolve3(values: &[i32]) -> Vec<i32> {
     let mut out: Vec<i32> = Vec::new();
     for i in 0..values.len() - 2 {
-        out.push(values[i] + values[i+1] + values[i+2]);
+        out.push(values[i] + values[i + 1] + values[i + 2]);
     }
     out
 }
