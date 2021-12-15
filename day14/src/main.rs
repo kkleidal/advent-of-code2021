@@ -1,18 +1,18 @@
-#![feature(linked_list_cursors)]
-
-use std::collections::LinkedList;
 use std::collections::HashMap;
+use std::collections::LinkedList;
 use std::io;
 
 #[derive(Debug)]
 struct PolymerTemplate {
-    seq: LinkedList<char>,
-    rule_tree: HashMap<char, HashMap<char, char>>,  // map first to second to middle
+    unigram_counts: HashMap<char, usize>,
+    bigram_counts: HashMap<(char, char), usize>,
+    rule_tree: HashMap<char, HashMap<char, char>>, // map first to second to middle
 }
 
 impl PolymerTemplate {
     fn parse() -> PolymerTemplate {
-        let mut seq: LinkedList<char> = LinkedList::new();
+        let mut unigram_counts: HashMap<char, usize> = HashMap::new();
+        let mut bigram_counts: HashMap<(char, char), usize> = HashMap::new();
         let mut rule_tree: HashMap<char, HashMap<char, char>> = HashMap::new();
         let mut state = 0;
         let mut buffer = String::new();
@@ -30,8 +30,16 @@ impl PolymerTemplate {
                         state = 1;
                         continue;
                     }
+                    let mut last: Option<char> = None;
                     for c in buffer.trim().chars() {
-                        seq.push_back(c);
+                        *(unigram_counts.entry(c).or_insert(0)) += 1;
+                        match last {
+                            None => {}
+                            Some(last_c) => {
+                                *(bigram_counts.entry((last_c, c)).or_insert(0)) += 1;
+                            }
+                        }
+                        last = Some(c);
                     }
                 }
                 1 => {
@@ -50,45 +58,50 @@ impl PolymerTemplate {
             }
             buffer.clear();
         }
-        PolymerTemplate{seq, rule_tree}
-    }
-
-    fn render(&self) {
-        for c in self.seq.iter() {
-            print!("{}", c);
+        PolymerTemplate {
+            unigram_counts,
+            bigram_counts,
+            rule_tree,
         }
-        println!();
     }
 
     fn len(&self) -> usize {
-        self.seq.len()
+        self.unigram_counts.values().sum()
     }
 
     fn score(&self) -> usize {
-        let mut el_counts: HashMap<char, usize> = HashMap::new();
-        for c in self.seq.iter() {
-            *el_counts.entry(*c).or_insert(0) += 1;
-        }
-        let most_common = el_counts.iter().reduce(|x, y| if x.1 >= y.1 { x } else { y }).unwrap().1;
-        let least_common = el_counts.iter().reduce(|x, y| if x.1 <= y.1 { x } else { y }).unwrap().1;
+        let most_common = self
+            .unigram_counts
+            .iter()
+            .reduce(|x, y| if x.1 >= y.1 { x } else { y })
+            .unwrap()
+            .1;
+        let least_common = self
+            .unigram_counts
+            .iter()
+            .reduce(|x, y| if x.1 <= y.1 { x } else { y })
+            .unwrap()
+            .1;
         most_common - least_common
     }
 
     fn replacement_step(&mut self) {
-        let mut cur = self.seq.cursor_front_mut();
-        loop {
-            let a = *cur.current().unwrap();
-            match cur.peek_next() {
-                Some(b) => {
-                    if self.rule_tree.contains_key(&a) && self.rule_tree[&a].contains_key(&b) {
-                        let c = self.rule_tree[&a][&b];
-                        cur.insert_after(c);
-                        cur.move_next();
-                    }
-                    cur.move_next();
-                }
-                None => {
-                    break;
+        for (key, count) in self
+            .bigram_counts
+            .iter()
+            .map(|x| (*x.0, *x.1))
+            .collect::<Vec<((char, char), usize)>>()
+            .iter()
+        {
+            let a = key.0;
+            let c = key.1;
+            if self.rule_tree.contains_key(&a) {
+                if self.rule_tree[&a].contains_key(&c) {
+                    let b = self.rule_tree[&a][&c];
+                    *(self.unigram_counts.entry(b).or_insert(0)) += count;
+                    *(self.bigram_counts.entry((a, b)).or_insert(0)) += count;
+                    *(self.bigram_counts.entry((b, c)).or_insert(0)) += count;
+                    *(self.bigram_counts.entry((a, c)).or_insert(0)) -= count;
                 }
             }
         }
@@ -97,11 +110,9 @@ impl PolymerTemplate {
 
 fn main() {
     let mut template = PolymerTemplate::parse();
-    template.render();
     template.replacement_step();
-    template.render();
     // For part 1, steps is 10. For part 2, 40
-    let steps = 10;
+    let steps = 40;
     for i in 0..(steps - 1) {
         template.replacement_step();
     }
