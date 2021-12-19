@@ -1,4 +1,5 @@
 use std::cmp;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::io;
@@ -27,6 +28,11 @@ impl Point {
             y: rot.3 * self.x + rot.4 * self.y + rot.5 * self.z,
             z: rot.6 * self.x + rot.7 * self.y + rot.8 * self.z,
         }
+    }
+
+    fn manhattan(&self, other: &Self) -> i64 {
+        let vec = *self - *other;
+        vec.x.abs() + vec.y.abs() + vec.z.abs()
     }
 }
 
@@ -66,6 +72,44 @@ impl Sub for Point {
             x: self.x - other.x,
             y: self.y - other.y,
             z: self.z - other.z,
+        }
+    }
+}
+
+struct Mapping {
+    rotation: (i64, i64, i64, i64, i64, i64, i64, i64, i64),
+    offset_vector: Point,
+}
+
+impl Mapping {
+    fn new(rotation: (i64, i64, i64, i64, i64, i64, i64, i64, i64), offset: Point) -> Self {
+        Self {
+            rotation,
+            offset_vector: offset,
+        }
+    }
+
+    fn identity() -> Self {
+        Self {
+            rotation: (1, 0, 0, 0, 1, 0, 0, 0, 1),
+            offset_vector: Point { x: 0, y: 0, z: 0 },
+        }
+    }
+
+    // fn rotate(&self, vector: Point) -> Point {
+    //     vector.transform(self.rotation)
+    // }
+    //
+    // fn transform(&self, point: Point) -> Point {
+    //     point.transform(self.rotation) + self.offset_vector
+    // }
+
+    fn compose(&self, other: &Mapping) -> Mapping {
+        let new_offset = self.offset_vector.transform(other.rotation) + other.offset_vector;
+        let new_rotation = mm(self.rotation, other.rotation);
+        Mapping {
+            rotation: new_rotation,
+            offset_vector: new_offset,
         }
     }
 }
@@ -116,22 +160,6 @@ fn parse() -> Vec<Vec<Point>> {
     }
     scanners
 }
-
-// [1, 0, 0],
-// [0, 0, -1],
-// [0, 1, 0],
-//
-// [1, 0, 0],
-// [0, -1, 0],
-// [0, 0, -1],
-//
-// [1, 0, 0],
-// [0, 0, 1],
-// [0, -1, 0],
-// --
-// [1, 0, 0],
-// [0, 0, 1],
-// [0, -1, 0],
 
 fn icos(rot_90deg: usize) -> i64 {
     match rot_90deg {
@@ -217,14 +245,11 @@ fn rotation_matrices() -> Vec<(i64, i64, i64, i64, i64, i64, i64, i64, i64)> {
     Vec::from_iter(found.iter().cloned())
 }
 
-fn reduce_positions(scanners: &Vec<Vec<Point>>) -> Vec<Vec<Point>> {
-    // TODO(ken.leidal): Ran out of time, but for part 2, return the transformation and offset that
-    // representings the mapping between coordinate frames (as well as the scanner indices that
-    // were combined). This will let us (in the parent scope) reconstruct a mapping for each
-    // scanner's coordinate frame and figure out where the scanner is relative to one of the
-    // beacons.
+fn reduce_positions(
+    scanners: &Vec<Vec<Point>>,
+) -> (Vec<Vec<Point>>, Option<((usize, usize), Mapping)>) {
     if scanners.len() == 1 {
-        return scanners.clone();
+        return (scanners.clone(), None);
     }
     let rotation_mats = rotation_matrices();
     for scanner_i in 0..(scanners.len() - 1) {
@@ -273,7 +298,10 @@ fn reduce_positions(scanners: &Vec<Vec<Point>>) -> Vec<Vec<Point>> {
                                     }
                                 })
                                 .collect();
-                            return new_scanners;
+                            return (
+                                new_scanners,
+                                Some(((scanner_j, scanner_i), Mapping::new(*rot_mat, offset))),
+                            );
                         }
                         maximal_overlap = cmp::max(overlap, maximal_overlap);
                         trials += 1;
@@ -287,9 +315,65 @@ fn reduce_positions(scanners: &Vec<Vec<Point>>) -> Vec<Vec<Point>> {
 }
 
 fn main() {
-    let mut scanners = parse();
-    while scanners.len() > 1 {
-        scanners = reduce_positions(&scanners);
+    let original_scanners = parse();
+    let mut scanners = original_scanners.clone();
+    let mut current_index_to_original_indices: HashMap<usize, HashSet<usize>> = HashMap::new();
+    let mut original_index_to_current_index: HashMap<usize, Mapping> = HashMap::new();
+    for i in 0..scanners.len() {
+        let mut set = HashSet::new();
+        set.insert(i);
+        current_index_to_original_indices.insert(i, set);
+        original_index_to_current_index.insert(i, Mapping::identity());
     }
+    while scanners.len() > 1 {
+        let out = reduce_positions(&scanners);
+        scanners = out.0;
+        match out.1 {
+            None => (),
+            Some(((removed, merged), mapping)) => {
+                let new_indices = current_index_to_original_indices[&removed].clone();
+
+                let new_mapping: HashMap<usize, HashSet<usize>> = current_index_to_original_indices
+                    .iter()
+                    .filter(|x| *x.0 != removed)
+                    .map(|(old_index, old_values)| {
+                        let new_index = if *old_index > removed {
+                            *old_index - 1
+                        } else {
+                            *old_index
+                        };
+                        let mut new_values = old_values.clone();
+                        if *old_index == merged {
+                            new_values.extend(new_indices.iter().cloned());
+                        }
+                        (new_index, new_values)
+                    })
+                    .collect();
+                current_index_to_original_indices = new_mapping;
+
+                for index in new_indices {
+                    let new_mapping = original_index_to_current_index[&index].compose(&mapping);
+                    original_index_to_current_index.insert(index, new_mapping);
+                }
+            }
+        }
+    }
+
+    let scanner_locations: Vec<Point> = (0..original_scanners.len())
+        .map(|i| {
+            let mapping = &original_index_to_current_index[&i];
+            let scanner_location = mapping.offset_vector;
+            scanner_location
+        })
+        .collect();
+
+    let mut distances: Vec<i64> = Vec::new();
+    for i in 0..(scanner_locations.len() - 1) {
+        for j in (i + 1)..scanner_locations.len() {
+            distances.push(scanner_locations[i].manhattan(&scanner_locations[j]));
+        }
+    }
+
     println!("Beacons: {}", scanners[0].len());
+    println!("Max distance: {}", distances.iter().max().unwrap());
 }
