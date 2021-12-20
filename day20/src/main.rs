@@ -137,7 +137,6 @@ fn parse() -> (Vec<bool>, Image) {
 }
 
 fn main() {
-    println!("Hello, world!");
     let (algorithm, original_image) = parse();
 
     let mut image = original_image.clone();
