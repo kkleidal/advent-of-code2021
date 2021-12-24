@@ -1,22 +1,21 @@
 use rudac::heap::FibonacciHeap;
-use std::io;
-use std::collections::{HashMap, HashSet, LinkedList};
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet, LinkedList};
 use std::hash::{Hash, Hasher};
+use std::io;
 
 #[derive(Debug, Clone, Copy)]
 enum NodeKind {
     Hallway,
     HallwayDoor,
-    RoomIngress,
-    RoomBack,
+    Room,
 }
 
 #[derive(Debug)]
 struct Node {
     y: usize,
     x: usize,
-    kind: NodeKind, 
+    kind: NodeKind,
 }
 
 #[derive(Debug)]
@@ -26,40 +25,17 @@ struct Graph {
 }
 
 impl Graph {
-    fn distance_between(&self, node1: usize, node2: usize) -> usize {
-        if node1 == node2 {
-            return 0;
-        }
-        // BFS
-        let mut queue: LinkedList<(usize, usize)> = LinkedList::new();
-        let mut visited: HashSet<usize> = HashSet::new();
-        queue.push_back((node1, 0));
-        visited.insert(node1);
-        while queue.len() > 0 {
-            let (node, dist) = queue.pop_front().unwrap();
-            if node == node2 {
-                return dist;
-            }
-            for adj in self.adjacency[&node].iter() {
-                if !visited.contains(&adj) {
-                    queue.push_back((*adj, dist + 1));
-                    visited.insert(*adj);
-                }
-            }
-        }
-        panic!("No path found");
-    }
-
     fn amph_dist_to_home(&self, node_id: usize, amph_kind: usize) -> usize {
-        let mut room_xs: Vec<usize> = Vec::new();
+        let mut room_xs: HashSet<usize> = HashSet::new();
         for node in self.nodes.iter() {
             match node.kind {
-                NodeKind::RoomIngress => {
-                    room_xs.push(node.x);
-                },
+                NodeKind::Room => {
+                    room_xs.insert(node.x);
+                }
                 _ => (),
             }
         }
+        let mut room_xs: Vec<usize> = room_xs.into_iter().collect();
         room_xs.sort();
         let dest_x = room_xs[amph_kind];
 
@@ -73,12 +49,9 @@ impl Graph {
             let node_x = self.nodes[node].x;
             if node_x == dest_x {
                 match self.nodes[node].kind {
-                    NodeKind::RoomIngress => {
+                    NodeKind::Room => {
                         return dist;
-                    },
-                    NodeKind::RoomBack => {
-                        return dist;
-                    },
+                    }
                     _ => (),
                 }
             }
@@ -90,7 +63,31 @@ impl Graph {
             }
         }
         panic!("No path found");
+    }
 
+    fn amph_is_home(&self, node_id: usize, amph_kind: usize) -> bool {
+        let node = &self.nodes[node_id];
+        match node.kind {
+            NodeKind::Room => (),
+            _ => {
+                return false;
+            }
+        }
+
+        let mut room_xs: HashSet<usize> = HashSet::new();
+        for node in self.nodes.iter() {
+            match node.kind {
+                NodeKind::Room => {
+                    room_xs.insert(node.x);
+                }
+                _ => (),
+            }
+        }
+        let mut room_xs: Vec<usize> = room_xs.into_iter().collect();
+        room_xs.sort();
+        let dest_x = room_xs[amph_kind];
+        let node_x = node.x;
+        dest_x == node_x
     }
 }
 
@@ -104,23 +101,17 @@ enum AmphipodState {
 impl PartialEq for AmphipodState {
     fn eq(&self, other: &Self) -> bool {
         match self {
-            AmphipodState::Unmoved => {
-                match other {
-                    AmphipodState::Unmoved => true,
-                    _ => false,
-                }
+            AmphipodState::Unmoved => match other {
+                AmphipodState::Unmoved => true,
+                _ => false,
             },
-            AmphipodState::MovedOut => {
-                match other {
-                    AmphipodState::MovedOut => true,
-                    _ => false,
-                }
+            AmphipodState::MovedOut => match other {
+                AmphipodState::MovedOut => true,
+                _ => false,
             },
-            AmphipodState::MovedIn => {
-                match other {
-                    AmphipodState::MovedIn => true,
-                    _ => false,
-                }
+            AmphipodState::MovedIn => match other {
+                AmphipodState::MovedIn => true,
+                _ => false,
             },
         }
     }
@@ -141,48 +132,6 @@ impl Hash for AmphipodState {
 #[derive(Debug, Clone)]
 struct State {
     node_to_amphipod: HashMap<usize, (usize, AmphipodState)>,
-}
-
-impl State {
-    fn render(&self, graph: &Graph) {
-        let start_x = graph.nodes.iter().map(|x| x.x).min().unwrap() - 1;
-        let end_x = graph.nodes.iter().map(|x| x.x).max().unwrap() + 2;
-        let start_y = graph.nodes.iter().map(|y| y.y).min().unwrap() - 1;
-        let end_y = graph.nodes.iter().map(|y| y.y).max().unwrap() + 2;
-
-        let mut grid: Vec<Vec<char>> = Vec::new();
-        for y in start_y..end_y {
-            let mut row: Vec<char> = Vec::new();
-            for x in start_x..end_x {
-                row.push('#');
-            }
-            grid.push(row);
-        }
-
-        for node in graph.nodes.iter() {
-            grid[node.y][node.x] = '.';
-        }
-
-        for (node_id, (kind, _)) in self.node_to_amphipod.iter() {
-            let node = &graph.nodes[*node_id];
-            grid[node.y][node.x] = match kind {
-                0 => 'A',
-                1 => 'B',
-                2 => 'C',
-                3 => 'D',
-                _ => panic!("Invalid type"),
-            };
-        }
-
-        for row in grid.iter() {
-            for c in row.iter() {
-                print!("{}", c);
-            }
-            println!();
-        }
-        println!();
-    }
-
 }
 
 impl PartialEq for State {
@@ -221,22 +170,23 @@ impl State {
             match node.kind {
                 NodeKind::Hallway => (),
                 NodeKind::HallwayDoor => (),
-                NodeKind::RoomIngress => {
-                    let back_node_id = find_adjacent_back(graph, node_id).unwrap();
-                    if self.node_to_amphipod.contains_key(&back_node_id) && self.node_to_amphipod.contains_key(&node_id) {
-                        let amph_kind = self.node_to_amphipod[&back_node_id].0;
-                        if amph_kind == self.node_to_amphipod[&node_id].0 {
-                            x_coords[amph_kind] = node.x;
-                            // Good
+                NodeKind::Room => {
+                    for back_node_id in find_room_stack(graph, node_id) {
+                        if self.node_to_amphipod.contains_key(&back_node_id)
+                            && self.node_to_amphipod.contains_key(&node_id)
+                        {
+                            let amph_kind = self.node_to_amphipod[&back_node_id].0;
+                            if amph_kind == self.node_to_amphipod[&node_id].0 {
+                                x_coords[amph_kind] = node.x;
+                                // Good
+                            } else {
+                                return false;
+                            }
                         } else {
                             return false;
                         }
-                    } else {
-                        return false;
                     }
-                    
-                },
-                NodeKind::RoomBack => (),
+                }
             }
         }
         if x_coords[3] > x_coords[2] && x_coords[2] > x_coords[1] && x_coords[1] > x_coords[0] {
@@ -258,16 +208,20 @@ fn parse() -> (Graph, State) {
             // End of input
             break;
         }
-        let mut row: Vec<(Option<NodeKind>, Option<usize>)> = buffer.chars().filter(|c| *c != '\n' && *c != '\r').map(|c| match c {
-            '#' => (None, None),
-            ' ' => (None, None),
-            '.' => (Some(NodeKind::Hallway), None),
-            'A' => (Some(NodeKind::RoomBack), Some(0)),
-            'B' => (Some(NodeKind::RoomBack), Some(1)),
-            'C' => (Some(NodeKind::RoomBack), Some(2)),
-            'D' => (Some(NodeKind::RoomBack), Some(3)),
-            _ => panic!("Unknown character {}", c),
-        }).collect();
+        let row: Vec<(Option<NodeKind>, Option<usize>)> = buffer
+            .chars()
+            .filter(|c| *c != '\n' && *c != '\r')
+            .map(|c| match c {
+                '#' => (None, None),
+                ' ' => (None, None),
+                '.' => (Some(NodeKind::Hallway), None),
+                'A' => (Some(NodeKind::Room), Some(0)),
+                'B' => (Some(NodeKind::Room), Some(1)),
+                'C' => (Some(NodeKind::Room), Some(2)),
+                'D' => (Some(NodeKind::Room), Some(3)),
+                _ => panic!("Unknown character {}", c),
+            })
+            .collect();
         grid.push(row);
         buffer.clear();
     }
@@ -278,36 +232,28 @@ fn parse() -> (Graph, State) {
     for y in 0..height {
         let width = grid[y].len();
         for x in 0..width {
-            let (kind_opt, amph_opt) = &grid[y][x];
+            let (kind_opt, _) = &grid[y][x];
             match kind_opt {
                 None => (),
                 Some(kind) => {
                     let my_kind = match kind {
                         NodeKind::Hallway => {
-                            let below = if grid[y+1].len() > x {
-                                grid[y+1][x].0.clone()
+                            let below = if grid[y + 1].len() > x {
+                                grid[y + 1][x].0.clone()
                             } else {
                                 None
                             };
                             let my_kind = match below {
-                                Some(below_kind) => NodeKind::HallwayDoor,
+                                Some(_) => NodeKind::HallwayDoor,
                                 None => NodeKind::Hallway,
                             };
                             my_kind
-                        },
-                        NodeKind::RoomBack => {
-                            let above = grid[y-1][x].0.unwrap().clone();
-                            let my_kind = match above {
-                                NodeKind::Hallway => NodeKind::RoomIngress,
-                                NodeKind::RoomBack => NodeKind::RoomBack,
-                                _ => panic!("Unexpected value"),
-                            };
-                            my_kind
-                        },
+                        }
+                        NodeKind::Room => NodeKind::Room,
                         _ => panic!("Unexpected value"),
                     };
                     let node_id = nodes.len();
-                    nodes.push(Node{
+                    nodes.push(Node {
                         y,
                         x,
                         kind: my_kind,
@@ -327,11 +273,13 @@ fn parse() -> (Graph, State) {
             let key = (y2, x2);
             if loc_to_node.contains_key(&key) {
                 let neighbor = loc_to_node[&key];
-                adjacency.entry(*node_id).or_insert(HashSet::new()).insert(neighbor);
+                adjacency
+                    .entry(*node_id)
+                    .or_insert(HashSet::new())
+                    .insert(neighbor);
             }
         }
     }
-
 
     let mut node_to_amphipod: HashMap<usize, (usize, AmphipodState)> = HashMap::new();
     for ((y, x), node_id) in loc_to_node.iter() {
@@ -340,24 +288,23 @@ fn parse() -> (Graph, State) {
         match grid[yu][xu].1 {
             Some(amphipod_type) => {
                 node_to_amphipod.insert(*node_id, (amphipod_type, AmphipodState::Unmoved));
-            },
+            }
             None => (),
         }
     }
 
-
-    let graph = Graph {
-        nodes,
-        adjacency,
-    };
-    let state = State {
-        node_to_amphipod,
-    };
+    let graph = Graph { nodes, adjacency };
+    let state = State { node_to_amphipod };
 
     (graph, state)
 }
 
-fn find_accessible_nodes(graph: &Graph, state: &State, node_id: usize, amphipod_type: usize) -> Vec<(usize, usize)> {
+fn find_accessible_nodes(
+    graph: &Graph,
+    state: &State,
+    node_id: usize,
+    amphipod_type: usize,
+) -> Vec<(usize, usize)> {
     let mut out: Vec<(usize, usize)> = Vec::new();
     let mut stack: LinkedList<(usize, usize)> = LinkedList::new();
     let mut will_visit: HashSet<usize> = HashSet::new();
@@ -382,65 +329,118 @@ fn find_accessible_nodes(graph: &Graph, state: &State, node_id: usize, amphipod_
     out
 }
 
-fn find_adjacent_back(graph: &Graph, node_id: usize) -> Option<usize> {
-    for adj in graph.adjacency[&node_id].iter() {
-        let node = &graph.nodes[*adj];
-        if let NodeKind::RoomBack = node.kind {
-            return Some(*adj);
+fn find_room_stack(graph: &Graph, node_id: usize) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    let my_node = &graph.nodes[node_id];
+    let my_x = my_node.x;
+    for (i, node) in graph.nodes.iter().enumerate() {
+        if node.x == my_x {
+            match node.kind {
+                NodeKind::Room => {
+                    out.push(i);
+                }
+                _ => (),
+            }
         }
     }
-    None
+    out
 }
+
+fn find_room_stack_below(graph: &Graph, node_id: usize) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    let my_node = &graph.nodes[node_id];
+    let my_x = my_node.x;
+    let my_y = my_node.y;
+    for (i, node) in graph.nodes.iter().enumerate() {
+        if node.x == my_x && node.y > my_y {
+            match node.kind {
+                NodeKind::Room => {
+                    out.push(i);
+                }
+                _ => (),
+            }
+        }
+    }
+    out
+}
+
+// fn find_adjacent_back(graph: &Graph, node_id: usize) -> Option<usize> {
+//     for adj in graph.adjacency[&node_id].iter() {
+//         let node = &graph.nodes[*adj];
+//         if let NodeKind::RoomBack = node.kind {
+//             return Some(*adj);
+//         }
+//     }
+//     None
+// }
 
 fn possible_next_states(graph: &Graph, state: &State) -> Vec<(State, usize)> {
     let mut costs: Vec<(State, usize)> = Vec::new();
     for (node_id, (amphipod_type, amphi_state)) in state.node_to_amphipod.iter() {
         match amphi_state {
             AmphipodState::Unmoved => {
-                for (dest_id, cost) in find_accessible_nodes(graph, state, *node_id, *amphipod_type) {
+                for (dest_id, cost) in find_accessible_nodes(graph, state, *node_id, *amphipod_type)
+                {
                     let dest = &graph.nodes[dest_id];
                     match dest.kind {
                         NodeKind::Hallway => {
                             let mut new_node_to_amphipod = state.node_to_amphipod.clone();
                             new_node_to_amphipod.remove(node_id);
-                            new_node_to_amphipod.insert(dest_id, (*amphipod_type, AmphipodState::MovedOut));
-                            costs.push((State{node_to_amphipod: new_node_to_amphipod}, cost));
-                        },
+                            new_node_to_amphipod
+                                .insert(dest_id, (*amphipod_type, AmphipodState::MovedOut));
+                            costs.push((
+                                State {
+                                    node_to_amphipod: new_node_to_amphipod,
+                                },
+                                cost,
+                            ));
+                        }
                         NodeKind::HallwayDoor => (),
-                        NodeKind::RoomIngress => (),
-                        NodeKind::RoomBack => (),
+                        NodeKind::Room => (),
                     }
                 }
-            },
+            }
             AmphipodState::MovedOut => {
-                for (dest_id, cost) in find_accessible_nodes(graph, state, *node_id, *amphipod_type) {
+                for (dest_id, cost) in find_accessible_nodes(graph, state, *node_id, *amphipod_type)
+                {
                     let dest = &graph.nodes[dest_id];
                     match dest.kind {
                         NodeKind::Hallway => (),
                         NodeKind::HallwayDoor => (),
-                        NodeKind::RoomIngress => {
-                            let back_id = find_adjacent_back(graph, dest_id).unwrap();
-                            if state.node_to_amphipod.contains_key(&back_id) {
-                                // Only if the back isn't empty
-                                let neighbor_amphi_type = state.node_to_amphipod[&back_id].0;
-                                if neighbor_amphi_type == *amphipod_type {
-                                    // Only if they're the same the types
+                        NodeKind::Room => {
+                            if graph.amph_is_home(dest_id, *amphipod_type) {
+                                let mut valid: bool = true;
+                                for back_id in find_room_stack_below(graph, dest_id) {
+                                    if !state.node_to_amphipod.contains_key(&back_id) {
+                                        // Invalid, can't have blank spaces below
+                                        valid = false;
+                                        break;
+                                    }
+                                    let neighbor_amphi_type = state.node_to_amphipod[&back_id].0;
+                                    if neighbor_amphi_type != *amphipod_type {
+                                        // Invalid, can't mix amphipod types
+                                        valid = false;
+                                        break;
+                                    }
+                                }
+                                if valid {
+                                    // Valid placement
                                     let mut new_node_to_amphipod = state.node_to_amphipod.clone();
                                     new_node_to_amphipod.remove(node_id);
-                                    new_node_to_amphipod.insert(dest_id, (*amphipod_type, AmphipodState::MovedIn));
-                                    costs.push((State{node_to_amphipod: new_node_to_amphipod}, cost));
+                                    new_node_to_amphipod
+                                        .insert(dest_id, (*amphipod_type, AmphipodState::MovedIn));
+                                    costs.push((
+                                        State {
+                                            node_to_amphipod: new_node_to_amphipod,
+                                        },
+                                        cost,
+                                    ));
                                 }
                             }
-                        },
-                        NodeKind::RoomBack => {
-                            let mut new_node_to_amphipod = state.node_to_amphipod.clone();
-                            new_node_to_amphipod.remove(node_id);
-                            new_node_to_amphipod.insert(dest_id, (*amphipod_type, AmphipodState::MovedIn));
-                            costs.push((State{node_to_amphipod: new_node_to_amphipod}, cost));
-                        },
+                        }
                     }
                 }
-            },
+            }
             AmphipodState::MovedIn => (),
         }
     }
@@ -464,9 +464,7 @@ impl Eq for StateEntry {}
 
 impl Ord for StateEntry {
     fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .cost
-            .cmp(&self.cost)
+        other.cost.cmp(&self.cost)
     }
 }
 
@@ -491,9 +489,7 @@ fn heuristic(graph: &Graph, initial_state: &State) -> usize {
     //     cost += 10_usize.pow(*amphi_type as u32) * (graph.distance_between(p1, p2) - 1);
     // }
     // cost
-    
 
-    
     // Distance between amphipod and destination
     let mut cost: usize = 0;
     for (node_id, (amphi_type, _)) in initial_state.node_to_amphipod.iter() {
@@ -514,18 +510,14 @@ fn shortest_path(graph: &Graph, initial_state: &State) -> Option<usize> {
     });
     distances.insert(initial_state.clone(), 0);
     loop {
-        let popped = q.pop().expect("Empty queue");
+        let popped = match q.pop() {
+            Some(x) => x,
+            None => break,
+        };
         let current = &popped.state;
         let current_dist = distances[current];
-        println!("Queue size: {}, min cost: {}", q.size(), current_dist + heuristic(graph, current));
+        // println!("Queue size: {}, min cost: {}", q.size(), current_dist + heuristic(graph, current));
         if current.finished(graph) {
-
-            // let mut pp = popped.pp.clone();
-            // pp.push(popped.clone());
-            // for state_entry in pp {
-            //     state_entry.state.render(graph);
-            // }
-            
             return Some(distances[current]);
         }
         if visited.contains(current) {
@@ -554,7 +546,5 @@ fn shortest_path(graph: &Graph, initial_state: &State) -> Option<usize> {
 
 fn main() {
     let (graph, state) = parse();
-    println!("Graph: {:?}", graph);
-    println!("State: {:?}", state);
     println!("Costs: {}", shortest_path(&graph, &state).unwrap());
 }
